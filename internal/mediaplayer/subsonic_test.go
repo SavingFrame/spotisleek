@@ -130,3 +130,26 @@ func TestSongExists_SubsonicError_ReturnsError(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Contains(t, err.Error(), "Subsonic API error: Wrong username or password")
 }
+
+func TestTitlesEqual_TwoPass_StripsFtAndTrailingTags(t *testing.T) {
+	assert.True(t, titlesEqual(
+		"One More Time",
+		"One More Time (feat. Romanthony) (Remastered 2001)",
+	))
+}
+
+func TestCompareSongs_DurationTooFar_DoesNotMatch(t *testing.T) {
+	c := &SubsonicPlayer{}
+	providerSong := &domain.Song{
+		Artists:  []string{"Daft Punk"},
+		Title:    "One More Time",
+		Duration: 320 * time.Second,
+	}
+	subsonicSong := &SongResponse{
+		Title:    "One More Time (ft. Romanthony) (Remastered 2001)",
+		Artists:  []ArtistsResponse{{Name: "Daft Punk"}},
+		Duration: 333,
+	}
+
+	assert.False(t, c.compareSongs(providerSong, subsonicSong))
+}

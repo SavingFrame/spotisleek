@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,11 @@ import (
 )
 
 const songDurationTolerance = 5 * time.Second
+
+var (
+	featuringSegmentPattern   = regexp.MustCompile(`(?i)\s*[\(\[][^\)\]]*\b(?:ft|feat|featuring)\b[^\)\]]*[\)\]]`)
+	trailingBracketTagPattern = regexp.MustCompile(`\s*[\(\[][^\)\]]+[\)\]]\s*$`)
+)
 
 type SubsonicPlayer struct {
 	Player
@@ -208,9 +214,27 @@ func (c *SubsonicPlayer) compareSongs(providerSong *domain.Song, subsonicSong *S
 }
 
 func titlesEqual(providerTitle, subsonicTitle string) bool {
-	provider := normalizeText(providerTitle)
-	subsonic := normalizeText(subsonicTitle)
-	return provider != "" && provider == subsonic
+	providerStrict := normalizeText(providerTitle)
+	subsonicStrict := normalizeText(subsonicTitle)
+	if providerStrict != "" && providerStrict == subsonicStrict {
+		return true
+	}
+
+	providerLoose := normalizeText(normalizeTitleLoose(providerTitle))
+	subsonicLoose := normalizeText(normalizeTitleLoose(subsonicTitle))
+	return providerLoose != "" && providerLoose == subsonicLoose
+}
+
+func normalizeTitleLoose(title string) string {
+	title = featuringSegmentPattern.ReplaceAllString(title, " ")
+	for {
+		updated := trailingBracketTagPattern.ReplaceAllString(title, "")
+		if updated == title {
+			break
+		}
+		title = updated
+	}
+	return title
 }
 
 func artistsOverlap(providerArtists []string, subsonicSong *SongResponse) bool {

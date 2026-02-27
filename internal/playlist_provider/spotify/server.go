@@ -150,6 +150,7 @@ func (a *SpotifyAuthServer) buildAuthorizationURL(clientId string) (string, erro
 	q.Set("client_id", clientId)
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", a.RedirectURI())
+	q.Set("scope", "user-library-read")
 
 	return "https://accounts.spotify.com/authorize?" + q.Encode(), nil
 }
