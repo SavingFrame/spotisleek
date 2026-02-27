@@ -14,8 +14,8 @@ import (
 	"github.com/SavingFrame/spotisleep/internal/domain"
 )
 
-type SubsonicProvider struct {
-	Provider
+type SubsonicPlayer struct {
+	Player
 	httpClient *http.Client
 }
 
@@ -52,9 +52,9 @@ type SongResponse struct {
 	DisplayArtist string `json:"displayArtist"`
 }
 
-func NewSubsonicProvider(uri, username, password string) *SubsonicProvider {
-	return &SubsonicProvider{
-		Provider: Provider{
+func NewSubsonicProvider(uri, username, password string) *SubsonicPlayer {
+	return &SubsonicPlayer{
+		Player: Player{
 			URI:      uri,
 			Username: username,
 			Password: password,
@@ -65,7 +65,7 @@ func NewSubsonicProvider(uri, username, password string) *SubsonicProvider {
 	}
 }
 
-func (c *SubsonicProvider) SongExists(s *domain.Song) (*domain.Song, error) {
+func (c *SubsonicPlayer) SongExists(s *domain.Song) (*domain.Song, error) {
 	p := url.Values{}
 	p.Add("query", fmt.Sprintf("%s %s", s.Artist, s.Title))
 	body := APIResponse{}
@@ -89,7 +89,7 @@ func (c *SubsonicProvider) SongExists(s *domain.Song) (*domain.Song, error) {
 	return s, nil
 }
 
-func (c *SubsonicProvider) execRequest(method string, params url.Values, resBody any) (*http.Response, error) {
+func (c *SubsonicPlayer) execRequest(method string, params url.Values, resBody any) (*http.Response, error) {
 	salt := c.generateHash(16)
 	params.Add("u", c.Username)
 	params.Add("t", c.getMD5Password(c.Password, salt))
@@ -114,7 +114,7 @@ func (c *SubsonicProvider) execRequest(method string, params url.Values, resBody
 	return res, nil
 }
 
-func (c *SubsonicProvider) generateHash(n int) string {
+func (c *SubsonicPlayer) generateHash(n int) string {
 	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, n)
 	for i := range b {
@@ -123,7 +123,7 @@ func (c *SubsonicProvider) generateHash(n int) string {
 	return string(b)
 }
 
-func (c *SubsonicProvider) getMD5Password(password, salt string) string {
+func (c *SubsonicPlayer) getMD5Password(password, salt string) string {
 	hash := md5.Sum([]byte(password + salt))
 	return hex.EncodeToString(hash[:])
 }

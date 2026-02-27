@@ -15,7 +15,7 @@ import (
 )
 
 func TestGetMD5Password(t *testing.T) {
-	c := &SubsonicProvider{}
+	c := &SubsonicPlayer{}
 
 	hash := c.getMD5Password("password", "salt")
 
@@ -23,7 +23,7 @@ func TestGetMD5Password(t *testing.T) {
 }
 
 func TestGenerateHash_LengthAndCharset(t *testing.T) {
-	c := &SubsonicProvider{}
+	c := &SubsonicPlayer{}
 
 	hash := c.generateHash(24)
 

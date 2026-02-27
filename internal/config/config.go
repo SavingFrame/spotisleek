@@ -10,11 +10,14 @@ import (
 )
 
 type Config struct {
-	NAVIDROME_URL      string `mapstructure:"NAVIDROME_URL"`
-	NAVIDROME_USERNAME string `mapstructure:"NAVIDROME_USERNAME"`
-	NAVIDROME_PASSWORD string `mapstructure:"NAVIDROME_PASSWORD"`
-	SLSKD_URL          string `mapstructure:"SLSKD_URL"`
-	SLSKD_API_KEY      string `mapstructure:"SLSKD_API_KEY"`
+	NAVIDROME_URL         string `mapstructure:"NAVIDROME_URL"`
+	NAVIDROME_USERNAME    string `mapstructure:"NAVIDROME_USERNAME"`
+	NAVIDROME_PASSWORD    string `mapstructure:"NAVIDROME_PASSWORD"`
+	SLSKD_URL             string `mapstructure:"SLSKD_URL"`
+	SLSKD_API_KEY         string `mapstructure:"SLSKD_API_KEY"`
+	SPOTIFY_CLIENT_ID     string `mapstructure:"SPOTIFY_CLIENT_ID"`
+	SPOTIFY_CLIENT_SECRET string `mapstructure:"SPOTIFY_CLIENT_SECRET"`
+	SPOTIFY_REFRESH_TOKEN string `mapstructure:"SPOTIFY_REFRESH_TOKEN"`
 }
 
 func LoadConfig() (config Config, err error) {
