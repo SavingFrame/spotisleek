@@ -87,7 +87,7 @@ func TestSongExists_Found(t *testing.T) {
 	c := NewSubsonicProvider(server.URL, "alice", "secret")
 	c.httpClient = server.Client()
 
-	song := &domain.Song{Artist: "Queen", Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
+	song := &domain.Song{Artists: []string{"Queen"}, Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
 	got, err := c.SongExists(song)
 
 	require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestSongExists_NotFound(t *testing.T) {
 	c := NewSubsonicProvider(server.URL, "alice", "secret")
 	c.httpClient = server.Client()
 
-	song := &domain.Song{Artist: "Queen", Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
+	song := &domain.Song{Artists: []string{"Queen"}, Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
 	got, err := c.SongExists(song)
 
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestSongExists_SubsonicError_ReturnsError(t *testing.T) {
 	c := NewSubsonicProvider(server.URL, "alice", "secret")
 	c.httpClient = server.Client()
 
-	song := &domain.Song{Artist: "Queen", Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
+	song := &domain.Song{Artists: []string{"Queen"}, Title: "Bohemian Rhapsody", Duration: 354 * time.Second}
 	got, err := c.SongExists(song)
 
 	require.Error(t, err)

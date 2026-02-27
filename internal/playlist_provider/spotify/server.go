@@ -35,12 +35,19 @@ type exchangeCodeResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-func NewSpotifyAuthServer(port int, clientID, clientSecret string) *SpotifyAuthServer {
+type refreshTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	TokenType   string `json:"token_type"`
+}
+
+func NewSpotifyAuthServer(port int, clientID, clientSecret string, refreshToken string) *SpotifyAuthServer {
 	return &SpotifyAuthServer{
 		port:         port,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		clientID:     clientID,
 		clientSecret: clientSecret,
+		refreshToken: refreshToken,
 	}
 }
 
@@ -108,6 +115,34 @@ func (a *SpotifyAuthServer) StartServer() error {
 	return nil
 }
 
+func (a *SpotifyAuthServer) GetBearerToken() (string, error) {
+	if time.Now().After(a.bearerExpire) {
+		if err := a.refreshBearerToken(); err != nil {
+			return "", err
+		}
+	}
+	return a.bearerToken, nil
+}
+
+func (a *SpotifyAuthServer) refreshBearerToken() error {
+	form := url.Values{}
+	form.Add("grant_type", "refresh_token")
+	form.Add("refresh_token", a.refreshToken)
+	resBody := refreshTokenResponse{}
+	err := a.requestTokenEndpoint(form, &resBody)
+	if err != nil {
+		slog.Error("Failed to refresh Spotify bearer token", "error", err)
+		return err
+	}
+	if resBody.AccessToken == "" {
+		slog.Error("Spotify token refresh response did not contain access token")
+		return fmt.Errorf("Spotify token refresh response did not contain access token")
+	}
+	a.bearerToken = resBody.AccessToken
+	a.bearerExpire = time.Now().Add(time.Duration(resBody.ExpiresIn) * time.Second)
+	return nil
+}
+
 // buildAuthorizationURL implements step 1 of Spotify's Authorization Code Flow:
 // redirect the user to the returned URL and persist/verify the returned state.
 func (a *SpotifyAuthServer) buildAuthorizationURL(clientId string) (string, error) {
@@ -116,44 +151,53 @@ func (a *SpotifyAuthServer) buildAuthorizationURL(clientId string) (string, erro
 	q.Set("response_type", "code")
 	q.Set("redirect_uri", a.RedirectURI())
 
-	return spotifyAuthorizeEndpoint + "?" + q.Encode(), nil
+	return "https://accounts.spotify.com/authorize?" + q.Encode(), nil
 }
 
 func (a *SpotifyAuthServer) exchangeCodeForBearer(code string) error {
-	uri := "https://accounts.spotify.com/api/token"
-	headers := http.Header{}
-	headers.Add("Authorization", a.getBasicAuthHeader())
-	headers.Add("Content-Type", "application/x-www-form-urlencoded")
 	form := url.Values{}
 	form.Add("grant_type", "authorization_code")
 	form.Add("code", code)
 	form.Add("redirect_uri", a.RedirectURI())
+	responseBody := &exchangeCodeResponse{}
+	err := a.requestTokenEndpoint(form, responseBody)
+	if err != nil {
+		return fmt.Errorf("failed to request token endpoint: %w", err)
+	}
+	a.bearerToken = responseBody.AccessToken
+	a.bearerExpire = time.Now().Add(time.Duration(responseBody.ExpiresIn) * time.Second)
+	a.refreshToken = responseBody.RefreshToken
+	return nil
+}
+
+func (a *SpotifyAuthServer) requestTokenEndpoint(form url.Values, resBody any) error {
+	uri := "https://accounts.spotify.com/api/token"
+	headers := http.Header{}
+	headers.Add("Authorization", a.getBasicAuthHeader())
+	headers.Add("Content-Type", "application/x-www-form-urlencoded")
 	httpReq, err := http.NewRequest("POST", uri, strings.NewReader(form.Encode()))
 	if err != nil {
-		slog.Error("Failed to create HTTP request for Spotify access token", "error", err)
+		slog.Error("Failed to create HTTP request for Spotify auth token", "error", err)
 		return err
 	}
 	httpReq.Header = headers
 	res, err := a.httpClient.Do(httpReq)
 	if err != nil {
-		slog.Error("Failed to execute HTTP request for Spotify access token", "error", err)
+		slog.Error("Failed to execute HTTP request for Spotify auth token", "error", err)
 		return err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		slog.Error("Received non-OK response from Spotify access token endpoint", "status", res.StatusCode)
+		slog.Error("Received non-OK response from Spotify auth token endpoint", "status", res.StatusCode)
 		bodyBytes, _ := io.ReadAll(res.Body)
-		slog.Warn("Response body from Spotify access token endpoint", "body", string(bodyBytes))
-		return fmt.Errorf("received non-OK response from Spotify access token endpoint: %d", res.StatusCode)
+		slog.Warn("Response body from Spotify auth token endpoint", "body", string(bodyBytes))
+		return fmt.Errorf("received non-OK response from Spotify auth token endpoint: %d", res.StatusCode)
 	}
-	responseBody := &exchangeCodeResponse{}
+
 	decoder := json.NewDecoder(res.Body)
-	if err := decoder.Decode(responseBody); err != nil {
-		return fmt.Errorf("failed to decode response body from Spotify access token endpoint: %w", err)
+	if err := decoder.Decode(resBody); err != nil {
+		return fmt.Errorf("failed to decode response body from Spotify auth token endpoint: %w", err)
 	}
-	a.bearerToken = responseBody.AccessToken
-	a.bearerExpire = time.Now().Add(time.Duration(responseBody.ExpiresIn) * time.Second)
-	a.refreshToken = responseBody.RefreshToken
 	return nil
 }
 

@@ -7,11 +7,15 @@ import (
 	"os"
 
 	"github.com/SavingFrame/spotisleep/internal/config"
+	"github.com/SavingFrame/spotisleep/internal/mediaplayer"
 	"github.com/SavingFrame/spotisleep/internal/playlist_provider/spotify"
+	"github.com/SavingFrame/spotisleep/internal/syncer"
 )
 
-// var action = flag.String("action", "server", "Action to perform: server or auth")
-var port = flag.Int("port", 8989, "Port to run the server on")
+var (
+	port   = flag.Int("port", 8989, "Port to run the server on")
+	dryRun = flag.Bool("dry-run", false, "Run the sync process without making any changes to the media player")
+)
 
 func main() {
 	config, err := config.LoadConfig()
@@ -21,13 +25,29 @@ func main() {
 	}
 	flag.Parse()
 	action := getActionArgument()
-	providerAuthServer := spotify.NewSpotifyAuthServer(*port, config.SPOTIFY_CLIENT_ID, config.SPOTIFY_CLIENT_SECRET)
-	// provider := spotify.NewSpotifyProvider(providerAuthServer)
+	providerAuthServer := spotify.NewSpotifyAuthServer(*port, config.SPOTIFY_CLIENT_ID, config.SPOTIFY_CLIENT_SECRET, config.SPOTIFY_REFRESH_TOKEN)
 	switch action {
 	case "auth":
 		handleAuth(providerAuthServer)
+	case "server":
+		if config.SPOTIFY_REFRESH_TOKEN == "" {
+			slog.Error("SPOTIFY_REFRESH_TOKEN is not set. Please run the auth flow first to obtain a refresh token.")
+			os.Exit(1)
+		}
+		provider := spotify.NewSpotifyProvider(providerAuthServer)
+		mediaplayer := mediaplayer.NewSubsonicProvider(config.NAVIDROME_URL, config.NAVIDROME_USERNAME, config.NAVIDROME_PASSWORD)
+		if err != nil {
+			slog.Error("Error creating media player", "error", err)
+			os.Exit(1)
+		}
+		service := syncer.NewService(provider, mediaplayer)
+		serverErr := service.RunOnce(*dryRun)
+		if serverErr != nil {
+			slog.Error("Error running sync service", "error", serverErr)
+			os.Exit(1)
+		}
+
 	}
-	// providerAuthServer.Start()
 }
 
 func handleAuth(providerAuthServer *spotify.SpotifyAuthServer) {

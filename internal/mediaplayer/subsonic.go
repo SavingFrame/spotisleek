@@ -9,10 +9,13 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/SavingFrame/spotisleep/internal/domain"
 )
+
+const songDurationTolerance = 5 * time.Second
 
 type SubsonicPlayer struct {
 	Player
@@ -42,14 +45,19 @@ type SearchResult3 struct {
 	Song []SongResponse `json:"song"`
 }
 
+type ArtistsResponse struct {
+	Name string `json:"name"`
+}
+
 type SongResponse struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	Album         string `json:"album"`
-	Artist        string `json:"artist"`
-	Duration      int    `json:"duration"`
-	MusicBrainzID string `json:"musicBrainzId"`
-	DisplayArtist string `json:"displayArtist"`
+	ID            string            `json:"id"`
+	Title         string            `json:"title"`
+	Album         string            `json:"album"`
+	Artist        string            `json:"artist"`
+	Artists       []ArtistsResponse `json:"artists"`
+	Duration      int               `json:"duration"`
+	MusicBrainzID string            `json:"musicBrainzId"`
+	DisplayArtist string            `json:"displayArtist"`
 }
 
 func NewSubsonicProvider(uri, username, password string) *SubsonicPlayer {
@@ -66,27 +74,80 @@ func NewSubsonicProvider(uri, username, password string) *SubsonicPlayer {
 }
 
 func (c *SubsonicPlayer) SongExists(s *domain.Song) (*domain.Song, error) {
+	if s == nil {
+		return nil, fmt.Errorf("song is nil")
+	}
+
+	queries := buildSearchQueries(s)
+	if len(queries) == 0 {
+		slog.Warn("Cannot search song in Subsonic: empty title", "artists", s.Artists)
+		return s, nil
+	}
+
+	for _, query := range queries {
+		songs, err := c.searchSong(query)
+		if err != nil {
+			return s, err
+		}
+		for i := range songs {
+			if c.compareSongs(s, &songs[i]) {
+				s.Exists = true
+				slog.Info("Song found in Subsonic library", "artists", s.Artists, "title", s.Title, "query", query)
+				return s, nil
+			}
+		}
+	}
+
+	slog.Info("Song not found in Subsonic library", "artists", s.Artists, "title", s.Title)
+	return s, nil
+}
+
+func buildSearchQueries(song *domain.Song) []string {
+	queries := make([]string, 0, len(song.Artists)+1)
+	seen := make(map[string]struct{}, len(song.Artists)+1)
+	addQuery := func(query string) {
+		query = strings.TrimSpace(query)
+		if query == "" {
+			return
+		}
+		normalized := strings.ToLower(query)
+		if _, exists := seen[normalized]; exists {
+			return
+		}
+		seen[normalized] = struct{}{}
+		queries = append(queries, query)
+	}
+
+	title := strings.TrimSpace(song.Title)
+	if title == "" {
+		return queries
+	}
+
+	if len(song.Artists) > 0 {
+		addQuery(fmt.Sprintf("%s %s", song.Artists[0], title))
+	}
+	addQuery(title)
+	for _, artist := range song.Artists[1:] {
+		addQuery(fmt.Sprintf("%s %s", artist, title))
+	}
+
+	return queries
+}
+
+func (c *SubsonicPlayer) searchSong(query string) ([]SongResponse, error) {
 	p := url.Values{}
-	p.Add("query", fmt.Sprintf("%s %s", s.Artist, s.Title))
+	p.Add("query", query)
 	body := APIResponse{}
 	_, err := c.execRequest("search3", p, &body)
 	if err != nil {
 		slog.Error("Failed to search for song in Subsonic", "error", err)
-		return s, err
+		return nil, err
 	}
 	if body.SubsonicResponse.Error.Code != 0 {
 		slog.Error("Subsonic API returned an error", "code", body.SubsonicResponse.Error.Code, "message", body.SubsonicResponse.Error.Message)
-		return s, fmt.Errorf("Subsonic API error: %s", body.SubsonicResponse.Error.Message)
+		return nil, fmt.Errorf("Subsonic API error: %s", body.SubsonicResponse.Error.Message)
 	}
-	for _, song := range body.SubsonicResponse.SearchResult3.Song {
-		if song.DisplayArtist == s.Artist && song.Title == s.Title && song.Duration == int(s.Duration.Seconds()) {
-			s.Exists = true
-			slog.Info("Song found in Subsonic library", "artist", s.Artist, "title", s.Title)
-			return s, nil
-		}
-	}
-	slog.Info("Song not found in Subsonic library", "artist", s.Artist, "title", s.Title)
-	return s, nil
+	return body.SubsonicResponse.SearchResult3.Song, nil
 }
 
 func (c *SubsonicPlayer) execRequest(method string, params url.Values, resBody any) (*http.Response, error) {
@@ -126,4 +187,87 @@ func (c *SubsonicPlayer) generateHash(n int) string {
 func (c *SubsonicPlayer) getMD5Password(password, salt string) string {
 	hash := md5.Sum([]byte(password + salt))
 	return hex.EncodeToString(hash[:])
+}
+
+func (c *SubsonicPlayer) compareSongs(providerSong *domain.Song, subsonicSong *SongResponse) bool {
+	if providerSong == nil || subsonicSong == nil {
+		return false
+	}
+
+	if !titlesEqual(providerSong.Title, subsonicSong.Title) {
+		return false
+	}
+	if !artistsOverlap(providerSong.Artists, subsonicSong) {
+		return false
+	}
+	if !durationClose(providerSong.Duration, subsonicSong.Duration) {
+		return false
+	}
+
+	return true
+}
+
+func titlesEqual(providerTitle, subsonicTitle string) bool {
+	provider := normalizeText(providerTitle)
+	subsonic := normalizeText(subsonicTitle)
+	return provider != "" && provider == subsonic
+}
+
+func artistsOverlap(providerArtists []string, subsonicSong *SongResponse) bool {
+	providerSet := make(map[string]struct{}, len(providerArtists))
+	for _, artist := range providerArtists {
+		addNormalizedArtist(providerSet, artist)
+	}
+	if len(providerSet) == 0 {
+		return false
+	}
+
+	subsonicSet := make(map[string]struct{}, len(subsonicSong.Artists)+2)
+	for _, artist := range subsonicSong.Artists {
+		addNormalizedArtist(subsonicSet, artist.Name)
+	}
+	if len(subsonicSet) == 0 {
+		// Fallback for servers that don't return searchResult3.song[].artists
+		addNormalizedArtist(subsonicSet, subsonicSong.DisplayArtist)
+		addNormalizedArtist(subsonicSet, subsonicSong.Artist)
+	}
+	if len(subsonicSet) == 0 {
+		return false
+	}
+
+	for artist := range providerSet {
+		if _, ok := subsonicSet[artist]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func addNormalizedArtist(set map[string]struct{}, artist string) {
+	normalized := normalizeText(artist)
+	if normalized == "" {
+		return
+	}
+	set[normalized] = struct{}{}
+}
+
+func durationClose(providerDuration time.Duration, subsonicDurationSeconds int) bool {
+	if providerDuration <= 0 || subsonicDurationSeconds <= 0 {
+		return true
+	}
+
+	subsonicDuration := time.Duration(subsonicDurationSeconds) * time.Second
+	diff := providerDuration - subsonicDuration
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= songDurationTolerance
+}
+
+func normalizeText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(value), " ")
 }
