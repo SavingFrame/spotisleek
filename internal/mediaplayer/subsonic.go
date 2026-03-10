@@ -14,13 +14,25 @@ import (
 	"time"
 
 	"github.com/SavingFrame/spotisleep/internal/domain"
+	"github.com/SavingFrame/spotisleep/internal/logutil"
 )
 
-const songDurationTolerance = 5 * time.Second
+const (
+	songDurationTolerance       = 5 * time.Second
+	strictSongDurationTolerance = 15 * time.Second
+)
 
 var (
 	featuringSegmentPattern   = regexp.MustCompile(`(?i)\s*[\(\[][^\)\]]*\b(?:ft|feat|featuring)\b[^\)\]]*[\)\]]`)
 	trailingBracketTagPattern = regexp.MustCompile(`\s*[\(\[][^\)\]]+[\)\]]\s*$`)
+	textNormalizationReplacer = strings.NewReplacer(
+		"’", "'",
+		"‘", "'",
+		"`", "'",
+		"´", "'",
+		"“", `"`,
+		"”", `"`,
+	)
 )
 
 type SubsonicPlayer struct {
@@ -86,25 +98,28 @@ func (c *SubsonicPlayer) SongExists(s *domain.Song) (*domain.Song, error) {
 
 	queries := buildSearchQueries(s)
 	if len(queries) == 0 {
-		slog.Warn("Cannot search song in Subsonic: empty title", "artists", s.Artists)
+		slog.Warn("Skipping Subsonic lookup: empty title", "song", logutil.Song(s))
 		return s, nil
 	}
 
-	for _, query := range queries {
+	slog.Info("Searching Subsonic library", "song", logutil.Song(s))
+	for idx, query := range queries {
+		slog.Debug("Trying Subsonic search query", "song", logutil.Song(s), "query", query, "attempt", idx+1, "total_attempts", len(queries))
 		songs, err := c.searchSong(query)
 		if err != nil {
 			return s, err
 		}
+		slog.Debug("Subsonic search returned candidates", "song", logutil.Song(s), "query", query, "candidates", len(songs))
 		for i := range songs {
 			if c.compareSongs(s, &songs[i]) {
 				s.Exists = true
-				slog.Info("Song found in Subsonic library", "artists", s.Artists, "title", s.Title, "query", query)
+				slog.Debug("Found in Subsonic library", "song", logutil.Song(s), "match", songs[i].Title)
 				return s, nil
 			}
 		}
 	}
 
-	slog.Info("Song not found in Subsonic library", "artists", s.Artists, "title", s.Title)
+	slog.Info("Song not found in Subsonic library", "song", logutil.Song(s))
 	return s, nil
 }
 
@@ -200,13 +215,19 @@ func (c *SubsonicPlayer) compareSongs(providerSong *domain.Song, subsonicSong *S
 		return false
 	}
 
-	if !titlesEqual(providerSong.Title, subsonicSong.Title) {
+	strictTitleMatch, looseTitleMatch := titleMatch(providerSong.Title, subsonicSong.Title)
+	if !strictTitleMatch && !looseTitleMatch {
 		return false
 	}
 	if !artistsOverlap(providerSong.Artists, subsonicSong) {
 		return false
 	}
-	if !durationClose(providerSong.Duration, subsonicSong.Duration) {
+
+	tolerance := songDurationTolerance
+	if strictTitleMatch {
+		tolerance = strictSongDurationTolerance
+	}
+	if !durationClose(providerSong.Duration, subsonicSong.Duration, tolerance) {
 		return false
 	}
 
@@ -214,15 +235,22 @@ func (c *SubsonicPlayer) compareSongs(providerSong *domain.Song, subsonicSong *S
 }
 
 func titlesEqual(providerTitle, subsonicTitle string) bool {
+	strictMatch, looseMatch := titleMatch(providerTitle, subsonicTitle)
+	return strictMatch || looseMatch
+}
+
+func titleMatch(providerTitle, subsonicTitle string) (strictMatch, looseMatch bool) {
 	providerStrict := normalizeText(providerTitle)
 	subsonicStrict := normalizeText(subsonicTitle)
-	if providerStrict != "" && providerStrict == subsonicStrict {
-		return true
+	strictMatch = providerStrict != "" && providerStrict == subsonicStrict
+	if strictMatch {
+		return strictMatch, true
 	}
 
 	providerLoose := normalizeText(normalizeTitleLoose(providerTitle))
 	subsonicLoose := normalizeText(normalizeTitleLoose(subsonicTitle))
-	return providerLoose != "" && providerLoose == subsonicLoose
+	looseMatch = providerLoose != "" && providerLoose == subsonicLoose
+	return strictMatch, looseMatch
 }
 
 func normalizeTitleLoose(title string) string {
@@ -275,7 +303,7 @@ func addNormalizedArtist(set map[string]struct{}, artist string) {
 	set[normalized] = struct{}{}
 }
 
-func durationClose(providerDuration time.Duration, subsonicDurationSeconds int) bool {
+func durationClose(providerDuration time.Duration, subsonicDurationSeconds int, tolerance time.Duration) bool {
 	if providerDuration <= 0 || subsonicDurationSeconds <= 0 {
 		return true
 	}
@@ -285,13 +313,15 @@ func durationClose(providerDuration time.Duration, subsonicDurationSeconds int) 
 	if diff < 0 {
 		diff = -diff
 	}
-	return diff <= songDurationTolerance
+	return diff <= tolerance
 }
 
 func normalizeText(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
+	value = textNormalizationReplacer.Replace(value)
+	value = strings.ToLower(value)
 	return strings.Join(strings.Fields(value), " ")
 }

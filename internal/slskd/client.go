@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SavingFrame/spotisleep/internal/domain"
+	"github.com/SavingFrame/spotisleep/internal/logutil"
 )
 
 type Transfer struct {
@@ -141,10 +142,11 @@ func (s *Slskd) searchSong(ctx context.Context, track *domain.Song) (*search, er
 		"searchText": fmt.Sprintf("%s - %s", track.Artists[0], track.Title),
 	}
 
+	slog.Info("Searching Soulseek", "song", logutil.Song(track), "query", body["searchText"])
 	var result search
 	err := s.doJSONRequest(ctx, http.MethodPost, "/searches", nil, body, &result, http.StatusOK)
 	if err != nil {
-		slog.Error("Failed to start SLSKD search", "error", err, "searchText", body["searchText"])
+		slog.Error("Failed to start Soulseek search", "error", err, "song", logutil.Song(track), "query", body["searchText"])
 		return nil, err
 	}
 

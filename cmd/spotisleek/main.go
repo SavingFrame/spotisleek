@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/SavingFrame/spotisleep/internal/config"
+	"github.com/SavingFrame/spotisleep/internal/logutil"
 	"github.com/SavingFrame/spotisleep/internal/mediaplayer"
 	"github.com/SavingFrame/spotisleep/internal/playlist_provider/spotify"
 	"github.com/SavingFrame/spotisleep/internal/slskd"
@@ -14,6 +15,8 @@ import (
 )
 
 func main() {
+	logutil.Configure()
+
 	config, err := config.LoadConfig()
 	if err != nil {
 		slog.Error("Error loading config", "error", err)

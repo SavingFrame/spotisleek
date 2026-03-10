@@ -138,7 +138,27 @@ func TestTitlesEqual_TwoPass_StripsFtAndTrailingTags(t *testing.T) {
 	))
 }
 
-func TestCompareSongs_DurationTooFar_DoesNotMatch(t *testing.T) {
+func TestTitlesEqual_NormalizesSmartQuotes(t *testing.T) {
+	assert.True(t, titlesEqual("Can’t Sleep", "Can't Sleep"))
+}
+
+func TestCompareSongs_StrictTitle_AllowsReleaseDurationDrift(t *testing.T) {
+	c := &SubsonicPlayer{}
+	providerSong := &domain.Song{
+		Artists:  []string{"Flyleaf"},
+		Title:    "All Around Me",
+		Duration: 198 * time.Second,
+	}
+	subsonicSong := &SongResponse{
+		Title:    "All Around Me",
+		Artists:  []ArtistsResponse{{Name: "Flyleaf"}},
+		Duration: 211,
+	}
+
+	assert.True(t, c.compareSongs(providerSong, subsonicSong))
+}
+
+func TestCompareSongs_LooseTitle_DurationTooFar_DoesNotMatch(t *testing.T) {
 	c := &SubsonicPlayer{}
 	providerSong := &domain.Song{
 		Artists:  []string{"Daft Punk"},

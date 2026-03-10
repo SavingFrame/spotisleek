@@ -68,13 +68,13 @@ func NewSpotifyProvider(authServer *SpotifyAuthServer) *SpotifyProvider {
 }
 
 func (p *SpotifyProvider) GetPlaylist(id string) ([]*domain.Song, error) {
-	token, err := p.authServer.GetBearerToken()
-	if err != nil {
-		slog.Error("Failed to get Spotify access token from auth server", "error", err)
+	if _, err := p.authServer.GetBearerToken(); err != nil {
+		slog.Error("Spotify authentication failed", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("Obtained Spotify access token", "token", token)
+	slog.Info("Spotify access token ready")
 	if id == "me" {
+		slog.Info("Loading saved tracks from Spotify")
 		return p.getFavouriteSongs()
 	}
 	return nil, fmt.Errorf("GetPlaylist not implemented yet")
@@ -83,19 +83,21 @@ func (p *SpotifyProvider) GetPlaylist(id string) ([]*domain.Song, error) {
 func (p *SpotifyProvider) getFavouriteSongs() ([]*domain.Song, error) {
 	limit := 50
 	offset := 0
-	parrams := url.Values{}
+	params := url.Values{}
 	var allSongs []*domain.Song
-	url := "https://api.spotify.com/v1/me/tracks?"
-	for {
-		parrams.Set("limit", fmt.Sprintf("%d", limit))
-		parrams.Set("offset", fmt.Sprintf("%d", offset))
-		urlWithParams := url + parrams.Encode()
+	requestURL := "https://api.spotify.com/v1/me/tracks?"
+
+	for page := 1; ; page++ {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+		params.Set("offset", fmt.Sprintf("%d", offset))
+		urlWithParams := requestURL + params.Encode()
 		resBody := spotifySavedTracksResponse{}
+
+		slog.Debug("Fetching Spotify saved tracks page", "page", page, "offset", offset, "limit", limit)
 		if err := p.execGetRequest(urlWithParams, &resBody); err != nil {
 			return nil, fmt.Errorf("failed to get Spotify saved tracks: %w", err)
 		}
 
-		// Process the response and add songs to allSongs
 		for _, item := range resBody.Items {
 			song := &domain.Song{
 				Title:    item.Track.Name,
@@ -109,11 +111,14 @@ func (p *SpotifyProvider) getFavouriteSongs() ([]*domain.Song, error) {
 			allSongs = append(allSongs, song)
 		}
 
+		slog.Debug("Fetched Spotify saved tracks page", "page", page, "tracks", len(resBody.Items), "total_collected", len(allSongs), "total", resBody.Total)
 		if resBody.Next == "" {
 			break
 		}
 		offset += limit
 	}
+
+	slog.Info("Loaded Spotify saved tracks", "count", len(allSongs))
 	return allSongs, nil
 }
 

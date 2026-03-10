@@ -11,33 +11,38 @@ import (
 	"syscall"
 
 	"github.com/SavingFrame/spotisleep/internal/domain"
+	"github.com/SavingFrame/spotisleep/internal/logutil"
 )
 
 func (s *Slskd) MoveFileToMusic(ctx context.Context, song *domain.Song) error {
 	if !s.moveFile {
+		slog.Info("Skipping file move; migration is disabled", "song", logutil.Song(song))
 		return nil
 	}
-	slog.Info("Moving downloaded file to music directory", "filename", song.FilePath)
 
 	absDownloadPath, err := s.resolveDownloadedFilePath(song.FilePath)
 	if err != nil {
-		slog.Error("Downloaded file does not exist at expected path", "path", song.FilePath)
+		slog.Error("Could not resolve downloaded file path", "error", err, "song", logutil.Song(song), "source", song.FilePath)
 		return err
-	}
-	if _, err := os.Stat(absDownloadPath); os.IsNotExist(err) {
-		slog.Error("Downloaded file does not exist at expected path", "path", absDownloadPath)
-		return fmt.Errorf("downloaded file does not exist at expected path: %s", absDownloadPath)
 	}
 
 	musicFilePath := s.resolveMusicFilePath(song)
+	slog.Info("Moving downloaded file into library", "song", logutil.Song(song), "source", absDownloadPath, "destination", musicFilePath)
+	if _, err := os.Stat(absDownloadPath); os.IsNotExist(err) {
+		slog.Error("Downloaded file not found", "song", logutil.Song(song), "source", absDownloadPath)
+		return fmt.Errorf("downloaded file does not exist at expected path: %s", absDownloadPath)
+	}
+
 	ensureErr := s.ensureMusicDirExists(musicFilePath)
 	if ensureErr != nil {
 		return fmt.Errorf("failed to ensure music directory exists: %w", ensureErr)
 	}
-	err = os.Rename(absDownloadPath, musicFilePath)
-	if err != nil {
+	if err := os.Rename(absDownloadPath, musicFilePath); err != nil {
 		return fmt.Errorf("failed to move downloaded file to music directory: %w", err)
 	}
+
+	song.FilePath = musicFilePath
+	slog.Info("Moved downloaded file into library", "song", logutil.Song(song), "destination", musicFilePath)
 	return nil
 }
 

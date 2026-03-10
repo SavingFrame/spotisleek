@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/SavingFrame/spotisleep/internal/domain"
+	"github.com/SavingFrame/spotisleep/internal/logutil"
 )
 
 const apiVersion = "v0"
@@ -42,7 +43,8 @@ func (s *Slskd) DownloadSong(ctx context.Context, song *domain.Song) error {
 	if err != nil {
 		return err
 	}
-	// add if to check isComplete and responseCount > 0, otherwise we might end up in a loop if the search fails for some reason
+
+	slog.Info("Started Soulseek search", "song", logutil.Song(song), "query", searchResult.SearchText)
 	retryCount := 0
 	searchTicker := time.NewTicker(5 * time.Second)
 	defer searchTicker.Stop()
@@ -56,11 +58,13 @@ func (s *Slskd) DownloadSong(ctx context.Context, song *domain.Song) error {
 				return err
 			}
 			retryCount++
+			slog.Debug("Waiting for Soulseek search results", "song", logutil.Song(song), "attempt", retryCount, "state", searchResult.State, "responses", searchResult.ResponseCount, "files", searchResult.FileCount)
 			if retryCount > 10 {
 				return fmt.Errorf("search did not complete after %d retries", retryCount)
 			}
 		}
 	}
+
 	results, err := s.getSearchResponses(ctx, searchResult.ID)
 	if err != nil {
 		return err
@@ -68,10 +72,13 @@ func (s *Slskd) DownloadSong(ctx context.Context, song *domain.Song) error {
 	if len(results) == 0 {
 		return fmt.Errorf("no responses found for search %s", searchResult.ID)
 	}
+	slog.Info("Received Soulseek search responses", "song", logutil.Song(song), "responses", len(results))
+
 	files := s.findSongInResponses(results, song)
 	if len(files) == 0 {
 		return fmt.Errorf("no matching files found in search responses")
 	}
+	slog.Info("Found matching downloadable files", "song", logutil.Song(song), "matches", len(files))
 
 	const (
 		downloadPollInterval = 5 * time.Second
@@ -81,12 +88,13 @@ func (s *Slskd) DownloadSong(ctx context.Context, song *domain.Song) error {
 
 fileloop:
 	for i, file := range files {
+		slog.Debug("Trying download candidate", "song", logutil.Song(song), "candidate", i+1, "total_candidates", len(files), "filename", file.Filename, "username", file.username, "size_bytes", file.Size, "bitrate", derefOr(file.BitRate, 0), "sample_rate", derefOr(file.SampleRate, 0))
 		transfer, err := s.enqueueDownload(ctx, &file)
 		if err != nil {
-			slog.Warn("Failed to enqueue download for file, trying next one", "error", err, "filename", file.Filename)
+			slog.Warn("Failed to enqueue download candidate", "error", err, "song", logutil.Song(song), "filename", file.Filename, "username", file.username)
 			continue
 		}
-		slog.Info("Enqueued download", "index", i, "filename", file.Filename, "username", transfer.Username, "downloadID", transfer.ID)
+		slog.Info("Download enqueued", "song", logutil.Song(song), "filename", file.Filename, "username", transfer.Username, "download_id", transfer.ID)
 
 		startedAt := time.Now()
 		lastProgressAt := time.Now()
@@ -101,24 +109,25 @@ fileloop:
 			case <-ticker.C:
 				transfer, err = s.getDownload(ctx, transfer.Username, transfer.ID)
 				if err != nil {
-					slog.Warn("Failed to get download status, retrying", "error", err, "username", transfer.Username, "downloadID", transfer.ID)
+					slog.Warn("Failed to refresh download status; trying next candidate", "error", err, "song", logutil.Song(song), "username", transfer.Username, "download_id", transfer.ID)
 					continue fileloop
 				}
 				if transfer.BytesTransferred > lastBytesTransferred {
 					lastProgressAt = time.Now()
 					lastBytesTransferred = transfer.BytesTransferred
+					slog.Debug("Download progress", "song", logutil.Song(song), "download_id", transfer.ID, "state", transfer.State, "progress", fmt.Sprintf("%.1f%%", transfer.PercentComplete), "transferred_bytes", transfer.BytesTransferred, "size_bytes", transfer.Size, "speed_bps", int64(transfer.AverageSpeed))
 				}
 				if transfer.State == "Completed, Succeeded" {
-					slog.Info("Download completed successfully", "filename", file.Filename, "username", transfer.Username, "downloadID", transfer.ID)
+					slog.Info("Download completed", "song", logutil.Song(song), "filename", file.Filename, "username", transfer.Username, "download_id", transfer.ID)
 					song.FilePath = file.Filename
 					return nil
 				} else if strings.HasPrefix(transfer.State, "Completed") {
-					slog.Warn("Download completed with non-success state, trying next file", "state", transfer.State, "filename", file.Filename, "username", transfer.Username, "downloadID", transfer.ID)
+					slog.Warn("Download candidate finished with non-success state", "song", logutil.Song(song), "state", transfer.State, "filename", file.Filename, "username", transfer.Username, "download_id", transfer.ID)
 					continue fileloop
 				}
 
 				if time.Since(startedAt) >= downloadTimeout || time.Since(lastProgressAt) >= stallTimeout {
-					slog.Warn("Download timed out, trying next file", "filename", file.Filename, "username", transfer.Username, "downloadID", transfer.ID)
+					slog.Warn("Download candidate timed out", "song", logutil.Song(song), "filename", file.Filename, "username", transfer.Username, "download_id", transfer.ID)
 					// TODO: Cancel the download in SLSKD if possible
 					continue fileloop
 				}
@@ -145,7 +154,7 @@ func (s *Slskd) findSongInResponses(responses []*searchResponse, song *domain.So
 			if file.Extension != "flac" {
 				continue
 			}
-			if song.Duration.Abs().Seconds() > 0 && song.Duration.Abs().Seconds()-float64(*file.Length) > 5 {
+			if file.Length != nil && song.Duration.Abs().Seconds() > 0 && song.Duration.Abs().Seconds()-float64(*file.Length) > 5 {
 				continue
 			}
 			sanitizedFilename := sanitizeString(file.Filename)
