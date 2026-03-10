@@ -28,24 +28,22 @@ type Slskd struct {
 }
 
 type Transfer struct {
-	AverageSpeed     float64  `json:"averageSpeed"`
-	BytesRemaining   int64    `json:"bytesRemaining"`
-	BytesTransferred int64    `json:"bytesTransferred"`
-	Direction        string   `json:"direction"`
-	ElapsedTime      *float64 `json:"elapsedTime"`
-	EndTime          *string  `json:"endTime"`
-	Filename         string   `json:"filename"`
-	ID               string   `json:"id"`
-	PercentComplete  float64  `json:"percentComplete"`
-	PlaceInQueue     *int     `json:"placeInQueue"`
-	RemainingTime    *float64 `json:"remainingTime"`
-	Size             int64    `json:"size"`
-	StartOffset      int64    `json:"startOffset"`
-	StartTime        *string  `json:"startTime"`
-	State            string   `json:"state"`
-	Token            int      `json:"token"`
-	Username         string   `json:"username"`
-	Exception        *string  `json:"exception"`
+	AverageSpeed     float64 `json:"averageSpeed"`
+	BytesRemaining   int64   `json:"bytesRemaining"`
+	BytesTransferred int64   `json:"bytesTransferred"`
+	Direction        string  `json:"direction"`
+	EndTime          *string `json:"endTime"`
+	Filename         string  `json:"filename"`
+	ID               string  `json:"id"`
+	PercentComplete  float64 `json:"percentComplete"`
+	PlaceInQueue     *int    `json:"placeInQueue"`
+	Size             int64   `json:"size"`
+	StartOffset      int64   `json:"startOffset"`
+	StartTime        *string `json:"startTime"`
+	State            string  `json:"state"`
+	Token            int     `json:"token"`
+	Username         string  `json:"username"`
+	Exception        *string `json:"exception"`
 }
 
 type QueueDownloadRequest struct {
@@ -67,7 +65,7 @@ type search struct {
 	ResponseCount   int        `json:"responseCount"`
 	SearchText      string     `json:"searchText"`
 	StartedAt       time.Time  `json:"startedAt"`
-	State           int        `json:"state"`
+	State           string     `json:"state"`
 	Token           int        `json:"token"`
 }
 
@@ -105,8 +103,8 @@ func NewSlskd(uri, apiKey string) *Slskd {
 	}
 }
 
-func (s *Slskd) DownloadSong(ctx context.Context, track *domain.Song) error {
-	searchResult, err := s.searchSong(ctx, track)
+func (s *Slskd) DownloadSong(ctx context.Context, song *domain.Song) error {
+	searchResult, err := s.searchSong(ctx, song)
 	if err != nil {
 		return err
 	}
@@ -136,7 +134,7 @@ func (s *Slskd) DownloadSong(ctx context.Context, track *domain.Song) error {
 	if len(results) == 0 {
 		return fmt.Errorf("no responses found for search %s", searchResult.ID)
 	}
-	files := s.findSongInResponses(results, track)
+	files := s.findSongInResponses(results, song)
 	if len(files) == 0 {
 		return fmt.Errorf("no matching files found in search responses")
 	}
@@ -351,7 +349,7 @@ func (s *Slskd) doJSONRequest(ctx context.Context, method, endpointPath string, 
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.apiKey))
+	req.Header.Set("X-API-KEY", s.apiKey)
 
 	res, err := s.httpClient.Do(req)
 	if err != nil {
