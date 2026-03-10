@@ -49,9 +49,14 @@ type spotifyTrack struct {
 	Name       string          `json:"name"`
 	DurationMs int             `json:"duration_ms"`
 	Artists    []spotifyArtist `json:"artists"`
+	Album      spotifyAlbum    `json:"album"`
 }
 
 type spotifyArtist struct {
+	Name string `json:"name"`
+}
+
+type spotifyAlbum struct {
 	Name string `json:"name"`
 }
 
@@ -93,9 +98,9 @@ func (p *SpotifyProvider) getFavouriteSongs() ([]*domain.Song, error) {
 		// Process the response and add songs to allSongs
 		for _, item := range resBody.Items {
 			song := &domain.Song{
-				Title: item.Track.Name,
-				// Duration: item.Track.DurationMs,
+				Title:    item.Track.Name,
 				Duration: time.Duration(item.Track.DurationMs) * time.Millisecond,
+				Album:    item.Track.Album.Name,
 				Artists:  make([]string, len(item.Track.Artists)),
 			}
 			for i, artist := range item.Track.Artists {
