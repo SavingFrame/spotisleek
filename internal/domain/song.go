@@ -8,4 +8,5 @@ type Song struct {
 	Title    string
 	Duration time.Duration
 	Exists   bool
+	FilePath string
 }

@@ -50,7 +50,7 @@ func main() {
 			slog.Error("SLSKD_URL and SLSKD_API_KEY must be set in the config to use the sync service")
 			os.Exit(1)
 		}
-		slskd := slskd.NewSlskd(config.SLSKD_URL, config.SLSKD_API_KEY)
+		slskd := slskd.NewSlskd(config.SLSKD_URL, config.SLSKD_API_KEY, config.MIGRATE_DOWNLOADS, config.DOWNLOADS_PATH, config.MUSIC_PATH)
 		service := syncer.NewService(provider, mediaplayer, slskd)
 		serverErr := service.RunOnce(*dryRun)
 		if serverErr != nil {

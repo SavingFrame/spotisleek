@@ -41,6 +41,10 @@ func (s *Service) RunOnce(dry bool) error {
 				slog.Error("Error downloading song from slskd", "error", err, "song", playerSong)
 				continue
 			}
+			err = s.slskd.MoveFileToMusic(context.Background(), playerSong)
+			if err != nil {
+				slog.Error("Error moving downloaded song to music directory", "error", err, "song", playerSong)
+			}
 			// TODO: DELETE, IT JUST FOR ONE SONG
 			break
 		}

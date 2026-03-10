@@ -18,12 +18,18 @@ type Config struct {
 	SPOTIFY_CLIENT_ID     string `mapstructure:"SPOTIFY_CLIENT_ID"`
 	SPOTIFY_CLIENT_SECRET string `mapstructure:"SPOTIFY_CLIENT_SECRET"`
 	SPOTIFY_REFRESH_TOKEN string `mapstructure:"SPOTIFY_REFRESH_TOKEN"`
+	MIGRATE_DOWNLOADS     bool   `mapstructure:"MIGRATE_DOWNLOADS"`
+	DOWNLOADS_PATH        string `mapstructure:"DOWNLOADS_PATH"`
+	MUSIC_PATH            string `mapstructure:"MUSIC_PATH"`
 }
 
 func LoadConfig() (config Config, err error) {
 	viper.AddConfigPath(".")
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
+	viper.SetDefault("MIGRATE_DOWNLOADS", false)
+	viper.SetDefault("DOWNLOADS_PATH", "/downloads")
+	viper.SetDefault("MUSIC_PATH", "/music")
 
 	viper.AutomaticEnv()
 
